@@ -6,6 +6,7 @@ A Retrieval-Augmented Generation (RAG) Question-Answering system powered by Goog
 - Document loading and chunking (PDF, etc.)
 - Vector embeddings and persistent vector search using ChromaDB
 - Context-grounded Q&A with Gemini models
+- Granular inline chunk citations (`[chunk N]`) with strict anti-hallucination fallback
 
 ## Setup
 
@@ -57,6 +58,22 @@ A Retrieval-Augmented Generation (RAG) Question-Answering system powered by Goog
    # Query experimental collection (rag_documents_v2)
    python ask.py "What is Retrieval-Augmented Generation?" --collection rag_documents_v2
    ```
+
+## Inline Chunk Citations
+
+`ask.py` returns inline citations in the format `[chunk N]` after each factual claim in the generated response. Each citation is directly grounded in the `chunk_index` metadata of the retrieved ChromaDB passages, providing granular traceability to the exact source chunks.
+
+### Example
+- **Query**: `"What technique is used to create a semantic tree-structured index?"`
+- **Answer**:
+  > *"The technique used to create a semantic tree-structured index is Recursive Abstractive Processing for Tree-Organized Retrieval (RAPTOR) [chunk 29], [chunk 30]."*
+
+### Grounded Anti-Hallucination Fallback
+When a question cannot be answered from the retrieved documents, the system strictly falls back to:
+```text
+I don't know based on the provided documents
+```
+No citations are generated, and the model avoids guessing or hallucinating facts — confirmed by testing with an out-of-scope question (`"What is the capital of Mars?"`).
 
 ## Debugging & Findings
 

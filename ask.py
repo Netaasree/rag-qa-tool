@@ -10,9 +10,10 @@ What it does:
 4. Generates an embedding vector for the question using `gemini-embedding-001` (guaranteeing vector symmetry with storage).
 5. Queries ChromaDB for the top 8 most semantically similar document chunks.
 6. Displays the retrieved chunks (chunk_index, source, and preview) so the user can inspect retrieval quality.
-7. Builds a strictly grounded prompt with the chunks as context and the mandatory anti-hallucination instruction:
+7. Builds a strictly grounded prompt with labeled chunks (`[chunk N]`) and explicit inline citation instructions,
+   while preserving the mandatory fallback phrase:
    "I don't know based on the provided documents" if the answer cannot be determined.
-8. Generates the final answer using `gemini-3.8-flash` via `client.models.generate_content()`.
+8. Generates the final grounded answer with inline citations using `gemini-3.8-flash` via `client.models.generate_content()`.
 9. Prints the final grounded answer clearly.
 """
 
@@ -21,7 +22,7 @@ import sys
 import time
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors
@@ -165,21 +166,40 @@ def print_retrieved_chunks(
         print(f"    Preview: \"{preview}\"\n")
 
 
-def construct_grounded_prompt(question: str, context_chunks: List[str]) -> str:
+def construct_grounded_prompt(
+    question: str,
+    context_chunks: List[str],
+    metadatas: Optional[List[Dict[str, Any]]] = None
+) -> str:
     """
-    Step 6a: Build a prompt that grounds the model strictly in retrieved context.
+    Step 6a: Build a prompt that grounds the model strictly in retrieved context with inline citations.
 
     Why this design:
     - RAG solves hallucination only if the prompt strictly enforces boundary conditions.
-    - We provide the retrieved chunks joined together as Context.
-    - We instruct the model to answer ONLY from that Context.
-    - We explicitly define a fallback phrase:
-      "I don't know based on the provided documents"
-      if the context does not contain sufficient information to answer the question.
+    - Each retrieved chunk is labeled with its chunk_index in the context block:
+      [chunk 12] <chunk text>
+      [chunk 7] <chunk text>
+    - The model is explicitly instructed to cite the chunk number inline after any claim it makes,
+      using the same [chunk N] format (e.g. 'The RAG pipeline uses RAPTOR [chunk 12] to improve retrieval.').
+    - Every factual sentence or claim must include its inline chunk citation.
+    - Consistency between context labels and citations ensures the model copies visible numbers
+      rather than generating or hallucinating chunk numbers from memory.
+    - If the context does not contain sufficient information to answer the question,
+      the fallback phrase is mandatory:
+      "I don't know based on the provided documents" (without citations).
     """
-    joined_context = "\n\n---\n\n".join(context_chunks)
+    formatted_chunks: List[str] = []
+    for i, doc in enumerate(context_chunks):
+        chunk_idx = None
+        if metadatas and i < len(metadatas) and isinstance(metadatas[i], dict):
+            chunk_idx = metadatas[i].get("chunk_index")
+        if chunk_idx is None:
+            chunk_idx = i
+        formatted_chunks.append(f"[chunk {chunk_idx}] {doc}")
 
-    prompt = f"""You are an accurate, reliable question-answering assistant. Your answers must be grounded strictly in the provided context documents.
+    joined_context = "\n\n---\n\n".join(formatted_chunks)
+
+    prompt = f"""You are an accurate, reliable question-answering assistant. Your answers must be grounded strictly in the provided context documents with inline citations.
 
 Context:
 {joined_context}
@@ -189,10 +209,13 @@ Question:
 
 Instructions:
 1. Answer the question using ONLY the facts directly mentioned in the Context above.
-2. If the answer cannot be determined strictly from the provided Context, you MUST respond with the exact phrase:
+2. Cite the chunk number inline after any claim or statement you make, using the exact [chunk N] format corresponding to where the information was found (e.g., "The RAG pipeline uses RAPTOR [chunk 12] to improve retrieval."). Every factual sentence must end with or include its inline chunk citation.
+3. If the answer cannot be determined strictly from the provided Context, you MUST respond with the exact phrase:
    "I don't know based on the provided documents"
-3. Do not speculate, extrapolate, or use any outside knowledge not present in the Context.
-4. Keep the answer clear, concise, and factual.
+   Do not provide citations or partial answers when responding with this phrase.
+4. Do not speculate, extrapolate, or use any outside knowledge not present in the Context.
+5. Only cite chunk numbers that are explicitly provided in the Context above (e.g., [chunk 12]). Never fabricate or hallucinate chunk numbers.
+6. Keep the answer clear, concise, and factual.
 """
     return prompt
 
@@ -263,7 +286,7 @@ def ask(question: str, collection_name: str = "rag_documents") -> str:
 
     # Step 6: Construct grounded prompt & generate response
     print("[Step 6] Constructing grounded prompt and querying 'gemini-3.8-flash'...")
-    prompt = construct_grounded_prompt(question, documents)
+    prompt = construct_grounded_prompt(question, documents, metadatas)
     answer = generate_grounded_answer(genai_client, prompt)
 
     # Step 7: Print final answer clearly
