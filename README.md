@@ -55,9 +55,11 @@ A Retrieval-Augmented Generation (RAG) Question-Answering system powered by Goog
    # Query default baseline collection (rag_documents)
    python ask.py "What is Retrieval-Augmented Generation?"
 
-   # Query experimental collection (rag_documents_v2)
-   python ask.py "What is Retrieval-Augmented Generation?" --collection rag_documents_v2
+   # Query alternate chunk-size collection (rag_documents_v2)
+   python ask.py "What embedding model does the paper use?" --collection rag_documents_v2
    ```
+   The `--collection` flag is optional, defaults to `rag_documents` (500/50 chunking), and `rag_documents_v2` (800/100 chunking) is available for comparison, as documented in the Chunk Size Comparison section.
+
 
 ## Inline Chunk Citations
 
